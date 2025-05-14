@@ -6,7 +6,7 @@ from datetime import datetime
 import pytz
 
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
-from telegram.constants import ChatAction, ChatType
+from telegram.constants import ChatAction, ChatType, ParseMode
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -40,8 +40,6 @@ cursor.execute("""
 """)
 conn.commit()
 
-# (You can continue adding your bot logic below this point...)
-
 # Update aura score
 def update_aura(user_id, username, amount):
     try:
@@ -73,7 +71,7 @@ async def send_typing(context: ContextTypes.DEFAULT_TYPE, chat_id):
 async def track_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     if update.effective_chat.type != ChatType.PRIVATE:
-        update_aura(user.id, user.username, 0)
+        update_aura(user.id, user.username or "", 0)
 
 # /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -89,15 +87,19 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=reply_markup
     )
 
-# Get random user (from tracked users)
+# Get random user
 async def random_user(update: Update):
-    members = await update.effective_chat.get_members_count()
-    # Only from tracked users (real tracking requires full db of participants)
+    _ = await update.effective_chat.get_member_count()  # just for context, unused
     cursor.execute("SELECT user_id, username FROM aura ORDER BY RANDOM() LIMIT 1;")
     result = cursor.fetchone()
+
     class Dummy:
-        def __init__(self, uid, uname): self.id, self.username = uid, uname
-        def mention_html(self): return f"<a href='tg://user?id={self.id}'>@{self.username or 'unknown'}</a>"
+        def __init__(self, uid, uname):
+            self.id = uid
+            self.username = uname or "unknown"
+        def mention_html(self):
+            return f"<a href='tg://user?id={self.id}'>@{self.username}</a>"
+
     return Dummy(result[0], result[1]) if result else update.effective_user
 
 # Command: /gay
@@ -119,7 +121,7 @@ async def couple(update: Update, context: ContextTypes.DEFAULT_TYPE):
     update_aura(user1[0], user1[1], 50)
     update_aura(user2[0], user2[1], 50)
     await update.message.reply_html(
-        f"Today's cutest couple is <a href='tg://user?id={user1[0]}'>@{user1[1]}</a> ❤️ <a href='tg://user?id={user2[0]}'>@{user2[1]}</a>! +50 aura each"
+        f"Today's cutest couple is <a href='tg://user?id={user1[0]}'>@{user1[1] or 'unknown'}</a> ❤️ <a href='tg://user?id={user2[0]}'>@{user2[1] or 'unknown'}</a>! +50 aura each"
     )
 
 # Command templates
@@ -169,10 +171,9 @@ async def ghost(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_html(f"{user.mention_html()} is tonight's ghost! No trace of life all night!")
 
 # Main
-TOKEN = os.environ.get("BOT_TOKEN")  # Get the bot token from environment variables
-
+TOKEN = os.environ.get("BOT_TOKEN")
 if not TOKEN:
-    raise ValueError("BOT_TOKEN environment variable not set.")  # Raise error if token is not found
+    raise ValueError("BOT_TOKEN environment variable not set.")
 
 def main():
     app = Application.builder().token(TOKEN).build()
@@ -189,7 +190,7 @@ def main():
     app.add_handler(CommandHandler("aura", aura))
     app.add_handler(CommandHandler("ghost", ghost))
 
-    # Track all users who send any message
+    # Track users
     app.add_handler(MessageHandler(filters.ALL, track_users))
 
     print("Bot is running...")
