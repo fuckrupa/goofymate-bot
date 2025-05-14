@@ -3,15 +3,16 @@ import random
 import psycopg2
 from datetime import datetime
 import pytz
-from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, ChatAction
-from telegram.constants import ChatAction
+
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram.constants import ChatAction, ChatType
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
     ContextTypes,
     MessageHandler,
     filters,
-    Application
+    Application,
 )
 
 # Logging setup
