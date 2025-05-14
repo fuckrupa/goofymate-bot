@@ -1,6 +1,7 @@
 import logging
 import random
 import psycopg2
+import os
 from datetime import datetime
 import pytz
 
@@ -21,8 +22,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# PostgreSQL connection using URL
-conn = psycopg2.connect("postgresql://username:password@host:port/dbname")
+# PostgreSQL connection using environment variable
+DATABASE_URL = os.environ.get("DATABASE_URL")
+if not DATABASE_URL:
+    raise ValueError("DATABASE_URL environment variable not set.")
+
+conn = psycopg2.connect(DATABASE_URL)
 cursor = conn.cursor()
 
 # Create aura table if not exists
@@ -34,6 +39,8 @@ cursor.execute("""
     );
 """)
 conn.commit()
+
+# (You can continue adding your bot logic below this point...)
 
 # Update aura score
 def update_aura(user_id, username, amount):
