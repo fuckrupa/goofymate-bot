@@ -4,7 +4,7 @@ import psycopg2
 from datetime import datetime
 import pytz
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, ChatAction
-from telegram.constants import ChatType
+from telegram.constants import ChatAction
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
