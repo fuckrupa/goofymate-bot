@@ -169,7 +169,10 @@ async def ghost(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_html(f"{user.mention_html()} is tonight's ghost! No trace of life all night!")
 
 # Main
-TOKEN = "YOUR_BOT_TOKEN"
+TOKEN = os.environ.get("BOT_TOKEN")  # Get the bot token from environment variables
+
+if not TOKEN:
+    raise ValueError("BOT_TOKEN environment variable not set.")  # Raise error if token is not found
 
 def main():
     app = Application.builder().token(TOKEN).build()
