@@ -520,6 +520,9 @@ async def set_commands(app):
 
 async def error_handler(update, context):
     logger.error("Error %s", update, exc_info=context.error)
+    
+async def raw_logger(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.debug(f"Raw update: {update}")
 
 def main():
     logger.info("Starting Aura Bot")
