@@ -2,12 +2,13 @@ import os
 import sqlite3
 import random
 import pytz
+import logging
+
 from datetime import (
     datetime,
     date,
     timedelta
 )
-
 from telegram import (
     Update,
     InlineKeyboardButton,
@@ -24,6 +25,13 @@ from telegram.ext import (
     MessageHandler,
     filters
 )
+
+# --- Logging Setup ---
+logging.basicConfig(
+    format="%(asctime)s | %(name)s | %(levelname)s | %(message)s",
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
 
 # --- Configuration ---
 DB_PATH = "bot.db"
@@ -93,10 +101,8 @@ c.execute(
 conn.commit()
 
 # --- Helpers ---
-def record_user(
-    user: User,
-    chat_id: int
-):
+def record_user(user: User, chat_id: int):
+    logger.debug("record_user: %s in chat %s", user.id, chat_id)
     now = datetime.utcnow().isoformat()
     c.execute(
         "INSERT OR REPLACE INTO users "
@@ -110,22 +116,20 @@ def record_user(
     )
     conn.commit()
 
-def in_cooldown(
-    cmd: str,
-    chat_id: int
-) -> bool:
+def in_cooldown(cmd: str, chat_id: int) -> bool:
+    logger.debug("in_cooldown: %s in %s", cmd, chat_id)
     today = date.today().isoformat()
     c.execute(
         "SELECT 1 FROM cooldowns "
         "WHERE command=? AND chat_id=? AND run_date=?",
         (cmd, chat_id, today)
     )
-    return c.fetchone() is not None
+    result = c.fetchone() is not None
+    logger.debug("in_cooldown? %s", result)
+    return result
 
-def set_cooldown(
-    cmd: str,
-    chat_id: int
-):
+def set_cooldown(cmd: str, chat_id: int):
+    logger.debug("set_cooldown: %s in %s", cmd, chat_id)
     today = date.today().isoformat()
     c.execute(
         "INSERT OR REPLACE INTO cooldowns "
@@ -134,11 +138,8 @@ def set_cooldown(
     )
     conn.commit()
 
-def can_announce(
-    user_id: int,
-    chat_id: int,
-    cmd: str
-) -> bool:
+def can_announce(user_id: int, chat_id: int, cmd: str) -> bool:
+    logger.debug("can_announce: %s for %s in %s", cmd, user_id, chat_id)
     now = datetime.utcnow()
     c.execute(
         "SELECT last_ts FROM announced "
@@ -149,13 +150,12 @@ def can_announce(
     if not row:
         return True
     last = datetime.fromisoformat(row[0])
-    return (now-last) >= timedelta(hours=1)
+    allowed = (now - last) >= timedelta(hours=1)
+    logger.debug("allowed? %s", allowed)
+    return allowed
 
-def set_announce_ts(
-    user_id: int,
-    chat_id: int,
-    cmd: str
-):
+def set_announce_ts(user_id: int, chat_id: int, cmd: str):
+    logger.debug("set_announce_ts: %s for %s in %s", cmd, user_id, chat_id)
     now = datetime.utcnow().isoformat()
     c.execute(
         "INSERT OR REPLACE INTO announced "
@@ -164,11 +164,8 @@ def set_announce_ts(
     )
     conn.commit()
 
-def change_aura(
-    user_id: int,
-    chat_id: int,
-    delta: int
-):
+def change_aura(user_id: int, chat_id: int, delta: int):
+    logger.debug("change_aura: %s %+d in %s", user_id, delta, chat_id)
     c.execute(
         "UPDATE aura SET balance=balance+? "
         "WHERE user_id=? AND chat_id=?",
@@ -176,238 +173,203 @@ def change_aura(
     )
     conn.commit()
 
-def pick_random_user(
-    chat_id: int
-) -> int:
+def pick_random_user(chat_id: int) -> int:
+    logger.debug("pick_random_user in %s", chat_id)
     c.execute(
-        "SELECT user_id FROM users "
-        "WHERE chat_id=?",
+        "SELECT user_id FROM users WHERE chat_id=?",
         (chat_id,)
     )
     ids = [r[0] for r in c.fetchall()]
-    return random.choice(ids) if ids else None
+    choice = random.choice(ids) if ids else None
+    logger.debug("picked %s", choice)
+    return choice
 
-def pick_two_users(
-    chat_id: int
-):
+def pick_two_users(chat_id: int):
+    logger.debug("pick_two_users in %s", chat_id)
     c.execute(
-        "SELECT user_id FROM users "
-        "WHERE chat_id=?",
+        "SELECT user_id FROM users WHERE chat_id=?",
         (chat_id,)
     )
     ids = [r[0] for r in c.fetchall()]
-    if len(ids)<2:
+    if len(ids) < 2:
         return None, None
-    return random.sample(ids,2)
+    pair = random.sample(ids, 2)
+    logger.debug("pair %s", pair)
+    return pair
 
 def bd_now():
     return datetime.now(BD_TZ)
 
 def is_bd_night() -> bool:
-    h = bd_now().hour
-    return h>=20 or h<6
+    hour = bd_now().hour
+    night = hour >= 20 or hour < 6
+    logger.debug("is_bd_night? %s (h=%s)", night, hour)
+    return night
 
 # --- Handlers ---
-async def start(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info("/start by %s in %s",
+                update.effective_user.id,
+                update.effective_chat.id)
     await context.bot.send_chat_action(
-        update.effective_chat.id,
-        ChatAction.TYPING
+        update.effective_chat.id, ChatAction.TYPING
     )
     kb = [
         [
-            InlineKeyboardButton(
-                "Updates",
-                url="https://t.me/YourChannel"
-            ),
-            InlineKeyboardButton(
-                "Support",
-                url="https://t.me/YourGroup"
-            )
+            InlineKeyboardButton("Updates",
+                                 url="https://t.me/YourChannel"),
+            InlineKeyboardButton("Support",
+                                 url="https://t.me/YourGroup")
         ],
         [
             InlineKeyboardButton(
                 "Add Me To Your Group",
-                url=(
-                    f"https://t.me/"
-                    f"{context.bot.username}"
-                    f"?startgroup=true"
-                )
+                url=(f"https://t.me/{context.bot.username}"
+                     "?startgroup=true")
             )
         ]
     ]
     await update.effective_message.reply_text(
-        "Welcome! I’m your fun Aura Bot. "
-        "Use /gay, /couple, /simp, /toxic, "
-        "/fight, /cringe, /respect, /sus, "
+        "Welcome! I’m your fun Aura Bot. Use /gay, /couple, "
+        "/simp, /toxic, /fight, /cringe, /respect, /sus, "
         "/aura or /ghost.",
         reply_markup=InlineKeyboardMarkup(kb)
     )
 
-async def handle_daily(
-    ctx,
-    update,
-    cmd,
-    delta,
-    award=True,
-    text_template="{}"
-):
+async def handle_daily(ctx, update, cmd, delta,
+                       award=True,
+                       text_template="{}"):
     chat_id = update.effective_chat.id
-    if in_cooldown(cmd,chat_id):
+    logger.info("handle_daily %s in %s", cmd, chat_id)
+    if in_cooldown(cmd, chat_id):
         return await update.effective_message.reply_text(
             f"❌ /{cmd} already used today."
         )
 
-    if cmd in ("couple","fight_random"):
-        u1,u2 = pick_two_users(chat_id)
+    if cmd in ("couple", "fight_random"):
+        u1, u2 = pick_two_users(chat_id)
         if not u1 or not u2:
             return await update.effective_message.reply_text(
                 "Not enough users yet."
             )
         users = [
-            await ctx.bot.get_chat_member(chat_id,u)
-            for u in (u1,u2)
+            await ctx.bot.get_chat_member(chat_id, u)
+            for u in (u1, u2)
         ]
         mentions = [u.user.mention_html() for u in users]
         msg = text_template.format(*mentions)
-        for u in (u1,u2):
-            change_aura(u,chat_id,delta)
-            if can_announce(u,chat_id,cmd):
+        for user_id in (u1, u2):
+            change_aura(user_id, chat_id, delta)
+            if can_announce(user_id, chat_id, cmd):
                 await ctx.bot.send_message(
                     chat_id, msg, parse_mode="HTML"
                 )
-                set_announce_ts(u,chat_id,cmd)
+                set_announce_ts(user_id, chat_id, cmd)
     else:
         uid = pick_random_user(chat_id)
         if not uid:
             return await update.effective_message.reply_text(
                 "No users recorded yet."
             )
-        member = await ctx.bot.get_chat_member(chat_id,uid)
+        member = await ctx.bot.get_chat_member(chat_id, uid)
         mention = member.user.mention_html()
         msg = text_template.format(mention)
-        change_aura(uid,chat_id,delta)
-        if can_announce(uid,chat_id,cmd):
+        change_aura(uid, chat_id, delta)
+        if can_announce(uid, chat_id, cmd):
             await update.effective_message.reply_html(msg)
-            set_announce_ts(uid,chat_id,cmd)
+            set_announce_ts(uid, chat_id, cmd)
         else:
             await update.effective_message.reply_html(
-                msg+"\n(Already announced within the last hour.)"
+                msg + "\n(Already announced within the last hour.)"
             )
+    set_cooldown(cmd, chat_id)
 
-    set_cooldown(cmd,chat_id)
-
-async def gay(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
+async def gay(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info("/gay by %s in %s",
+                update.effective_user.id,
+                update.effective_chat.id)
     await handle_daily(
-        context,update,
-        "gay",-100,
+        context, update, "gay", -100,
         award=False,
-        text_template=(
-            "🏳️‍🌈 Gay of the Day: {} 🏳️‍🌈"
-        )
+        text_template="🏳️‍🌈 Gay of the Day: {} 🏳️‍🌈"
     )
 
-async def couple(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
+async def couple(update: Update,
+                 context: ContextTypes.DEFAULT_TYPE):
+    logger.info("/couple by %s in %s",
+                update.effective_user.id,
+                update.effective_chat.id)
     await handle_daily(
-        context,update,
-        "couple",+100,
-        text_template=(
-            "💕 Couple of the Day: {} + {} 💕"
-        )
+        context, update, "couple", +100,
+        text_template="💕 Couple of the Day: {} + {} 💕"
     )
 
-async def simp(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
+async def simp(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info("/simp by %s in %s",
+                update.effective_user.id,
+                update.effective_chat.id)
     await handle_daily(
-        context,update,
-        "simp",+100,
-        text_template=(
-            "🥴 Biggest Simp Today: {} 🥴"
-        )
+        context, update, "simp", +100,
+        text_template="🥴 Biggest Simp Today: {} 🥴"
     )
 
-async def toxic(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
+async def toxic(update: Update,
+                context: ContextTypes.DEFAULT_TYPE):
+    logger.info("/toxic by %s in %s",
+                update.effective_user.id,
+                update.effective_chat.id)
     await handle_daily(
-        context,update,
-        "toxic",-100,
-        text_template=(
-            "☠️ Most Toxic Member: {} ☠️"
-        )
+        context, update, "toxic", -100,
+        text_template="☠️ Most Toxic Member: {} ☠️"
     )
 
-async def cringe(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
+async def cringe(update: Update,
+                 context: ContextTypes.DEFAULT_TYPE):
+    logger.info("/cringe by %s in %s",
+                update.effective_user.id,
+                update.effective_chat.id)
     await handle_daily(
-        context,update,
-        "cringe",-100,
-        text_template=(
-            "🤢 Cringiest User: {} 🤢"
-        )
+        context, update, "cringe", -100,
+        text_template="🤢 Cringiest User: {} 🤢"
     )
 
-async def respect(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
+async def respect(update: Update,
+                  context: ContextTypes.DEFAULT_TYPE):
+    logger.info("/respect by %s in %s",
+                update.effective_user.id,
+                update.effective_chat.id)
     await handle_daily(
-        context,update,
-        "respect",+500,
-        text_template=(
-            "🙏 Infinite Respect to: {} 🙏"
-        )
+        context, update, "respect", +500,
+        text_template="🙏 Infinite Respect to: {} 🙏"
     )
 
-async def sus(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
+async def sus(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info("/sus by %s in %s",
+                update.effective_user.id,
+                update.effective_chat.id)
     await handle_daily(
-        context,update,
-        "sus",+100,
-        text_template=(
-            "🔍 Sus of the Day: {} 🔍"
-        )
+        context, update, "sus", +100,
+        text_template="🔍 Sus of the Day: {} 🔍"
     )
 
-async def fight(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
+async def fight(update: Update,
+                context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
-    if update.message.reply_to_message:
+    reply = bool(update.message.reply_to_message)
+    logger.info("/fight by %s in %s reply=%s",
+                update.effective_user.id,
+                chat_id, reply)
+    if reply:
         challenger = update.effective_user.id
-        target      = (
-            update.message
-            .reply_to_message
-            .from_user.id
-        )
-        kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton(
+        target = update.message.reply_to_message.from_user.id
+        kb = InlineKeyboardMarkup([[
+            InlineKeyboardButton(
                 "Accept Fight 🥊",
-                callback_data=(
-                    f"accept|{challenger}|"
-                    f"{target}"
-                )
-            )]
-        ])
+                callback_data=f"accept|{challenger}|{target}"
+            )
+        ]])
         msg = await update.effective_message.reply_text(
-            f"{update.effective_user.mention_html()} "
-            f"has challenged "
+            f"{update.effective_user.mention_html()} has challenged "
             f"{update.message.reply_to_message.from_user.mention_html()} "
             f"to a fight!",
             parse_mode="HTML",
@@ -417,81 +379,70 @@ async def fight(
             "INSERT INTO fights "
             "(chat_id,user1,user2,msg_id,status) "
             "VALUES (?,?,?,?,?)",
-            (chat_id,challenger,target,
-             msg.message_id,'pending')
+            (chat_id, challenger, target,
+             msg.message_id, 'pending')
         )
         conn.commit()
     else:
-        if in_cooldown("fight",chat_id):
+        if in_cooldown("fight", chat_id):
             return await update.effective_message.reply_text(
                 "❌ /fight already used today."
             )
-        u1,u2 = pick_two_users(chat_id)
+        u1, u2 = pick_two_users(chat_id)
         if not u1 or not u2:
             return await update.effective_message.reply_text(
                 "Not enough users yet."
             )
         m1 = (
             await context.bot
-            .get_chat_member(chat_id,u1)
+            .get_chat_member(chat_id, u1)
         ).user.mention_html()
         m2 = (
             await context.bot
-            .get_chat_member(chat_id,u2)
+            .get_chat_member(chat_id, u2)
         ).user.mention_html()
-        winner  = random.choice([u1,u2])
-        wmention=(
+        winner = random.choice([u1, u2])
+        wmention = (
             await context.bot
-            .get_chat_member(chat_id,winner)
+            .get_chat_member(chat_id, winner)
         ).user.mention_html()
-        change_aura(winner,chat_id,+100)
+        change_aura(winner, chat_id, +100)
         await update.effective_message.reply_html(
-            f"🥊 Fight: {m1} vs {m2}! "
-            f"Winner: {wmention} 🎉"
+            f"🥊 Fight: {m1} vs {m2}! Winner: {wmention} 🎉"
         )
-        set_cooldown("fight",chat_id)
+        set_cooldown("fight", chat_id)
 
-async def button(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
+async def button(update: Update,
+                 context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     data = query.data.split("|")
-    if data[0]=="accept":
-        _,u1,u2 = data
-        u1,u2   = int(u1),int(u2)
-        if query.from_user.id!=u2:
+    logger.info("button data: %s", data)
+    if data[0] == "accept":
+        _, u1, u2 = data
+        u1, u2 = int(u1), int(u2)
+        if query.from_user.id != u2:
             return await query.edit_message_text(
                 "Only the challenged user can accept."
             )
-        winner = random.choice([u1,u2])
-        wmention=(
+        winner = random.choice([u1, u2])
+        wmention = (
             await query.bot
-            .get_chat_member(
-                query.message.chat_id,
-                winner
-            )
+            .get_chat_member(query.message.chat_id, winner)
         ).user.mention_html()
-        change_aura(
-            winner,
-            query.message.chat_id,
-            +100
-        )
+        change_aura(winner, query.message.chat_id, +100)
         await query.edit_message_text(
-            f"🥊 Fight accepted! "
-            f"Winner: {wmention} 🎉",
+            f"🥊 Fight accepted! Winner: {wmention} 🎉",
             parse_mode="HTML"
         )
 
-async def aura_cmd(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
+async def aura_cmd(update: Update,
+                   context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
+    logger.info("/aura in %s", chat_id)
     c.execute(
         "SELECT user_id,balance FROM aura "
-        "WHERE chat_id=?ORDER BY balance DESC",
+        "WHERE chat_id=? ORDER BY balance DESC",
         (chat_id,)
     )
     rows = c.fetchall()
@@ -500,33 +451,28 @@ async def aura_cmd(
             "No aura data yet."
         )
     text = "🏆 Aura Leaderboard 🏆\n"
-    for uid,bal in rows:
+    for uid, bal in rows:
         user = (
             await context.bot
-            .get_chat_member(chat_id,uid)
+            .get_chat_member(chat_id, uid)
         ).user
         text += f"{user.full_name}: {bal}\n"
     await update.effective_message.reply_text(text)
 
-async def ghost(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
+async def ghost(update: Update,
+                context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
-    now     = bd_now()
+    logger.info("/ghost in %s", chat_id)
+    now = bd_now()
     if not is_bd_night():
-        nxt = now.replace(
-            hour=20,minute=0,
-            second=0,microsecond=0
-        )
-        if now.hour>=20:
-            nxt+=timedelta(days=1)
-        mins = int(
-            (nxt-now).total_seconds()//60
-        )
+        nxt = now.replace(hour=20, minute=0,
+                          second=0, microsecond=0)
+        if now.hour >= 20:
+            nxt += timedelta(days=1)
+        mins = int((nxt - now).total_seconds() // 60)
         return await update.effective_message.reply_text(
-            f"🌙 /ghost only works at "
-            f"night BD time. {mins} mins until next."
+            f"🌙 /ghost only at night BD time. "
+            f"{mins} mins until next."
         )
     c.execute(
         "SELECT user_id,MIN(last_active) "
@@ -538,25 +484,25 @@ async def ghost(
         return await update.effective_message.reply_text(
             "No activity data."
         )
-    uid     = row[0]
+    uid = row[0]
     mention = (
         await context.bot
-        .get_chat_member(chat_id,uid)
+        .get_chat_member(chat_id, uid)
     ).user.mention_html()
     await update.effective_message.reply_html(
         f"👻 Ghost of the Night: {mention} 👻"
     )
 
-async def track_all(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
-    record_user(
-        update.effective_user,
-        update.effective_chat.id
-    )
+async def track_all(update: Update,
+                    context: ContextTypes.DEFAULT_TYPE):
+    logger.debug("track_all: %s in %s",
+                 update.effective_user.id,
+                 update.effective_chat.id)
+    record_user(update.effective_user,
+                update.effective_chat.id)
 
 async def set_commands(app):
+    logger.info("Setting commands")
     cmds = [
         BotCommand("start","Menu"),
         BotCommand("gay","Gay of Day"),
@@ -572,32 +518,37 @@ async def set_commands(app):
     ]
     await app.bot.set_my_commands(cmds)
 
+async def error_handler(update, context):
+    logger.error("Error %s", update, exc_info=context.error)
+
 def main():
+    logger.info("Starting Aura Bot")
     app = (
         ApplicationBuilder()
         .token(TOKEN)
         .post_init(set_commands)
         .build()
     )
+    app.add_error_handler(error_handler)
     app.add_handler(
         MessageHandler(
-            filters.ALL&filters.ChatType.GROUPS,
+            filters.ALL & filters.ChatType.GROUPS,
             track_all
         )
     )
-    app.add_handler(CommandHandler("start",start))
-    app.add_handler(CommandHandler("gay",gay))
-    app.add_handler(CommandHandler("couple",couple))
-    app.add_handler(CommandHandler("simp",simp))
-    app.add_handler(CommandHandler("toxic",toxic))
-    app.add_handler(CommandHandler("cringe",cringe))
-    app.add_handler(CommandHandler("respect",respect))
-    app.add_handler(CommandHandler("sus",sus))
-    app.add_handler(CommandHandler("fight",fight))
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("gay", gay))
+    app.add_handler(CommandHandler("couple", couple))
+    app.add_handler(CommandHandler("simp", simp))
+    app.add_handler(CommandHandler("toxic", toxic))
+    app.add_handler(CommandHandler("cringe", cringe))
+    app.add_handler(CommandHandler("respect", respect))
+    app.add_handler(CommandHandler("sus", sus))
+    app.add_handler(CommandHandler("fight", fight))
     app.add_handler(CallbackQueryHandler(button))
-    app.add_handler(CommandHandler("aura",aura_cmd))
-    app.add_handler(CommandHandler("ghost",ghost))
+    app.add_handler(CommandHandler("aura", aura_cmd))
+    app.add_handler(CommandHandler("ghost", ghost))
     app.run_polling()
 
-if __name__=="__main__":
+if __name__ == "__main__":
     main()
