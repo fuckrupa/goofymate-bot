@@ -522,29 +522,29 @@ async def error_handler(update, context):
     logger.error("Error %s", update, exc_info=context.error)
 
 def main():
-     logger.info("Starting Aura Bot")
-     app = (
-         ApplicationBuilder()
-         .token(TOKEN)
-         .post_init(set_commands)
-         .build()
-     )
-+
-+    # —————————————————————————————————————
-+    # catch every incoming update, highest priority
-+    app.add_handler(
-+        MessageHandler(filters.ALL, raw_logger),
-+        group=0
-+    )
-+    # —————————————————————————————————————
+    logger.info("Starting Aura Bot")
+    app = (
+        ApplicationBuilder()
+        .token(TOKEN)
+        .post_init(set_commands)
+        .build()
+    )
 
-     app.add_error_handler(error_handler)
-     app.add_handler(
-         MessageHandler(
-             filters.ALL & filters.ChatType.GROUPS,
-             track_all
-         )
-     )
+    # —————————————————————————————————————
+    # catch every incoming update, highest priority
+    app.add_handler(
+        MessageHandler(filters.ALL, raw_logger),
+        group=0
+    )
+    # —————————————————————————————————————
+
+    app.add_error_handler(error_handler)
+    app.add_handler(
+        MessageHandler(
+            filters.ALL & filters.ChatType.GROUPS,
+            track_all
+        )
+    )
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("gay", gay))
     app.add_handler(CommandHandler("couple", couple))
